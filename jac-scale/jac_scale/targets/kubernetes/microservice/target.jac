@@ -604,7 +604,14 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
         # bootstrap initContainer can mount + extract it at pod startup.
         source_cm = bundle.get("source_configmap");
         if source_cm {
-            self._apply_or_replace_configmap(core_v1, namespace, source_cm);
+            self._apply_or_replace(
+                core_v1,
+                "read_namespaced_config_map",
+                "replace_namespaced_config_map",
+                "create_namespaced_config_map",
+                namespace,
+                source_cm
+            );
             if self.logger {
                 self.logger.info(
                     f"Applied source ConfigMap (no-image mode)",
@@ -631,7 +638,14 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
         }
 
         for (svc_name, svc_manifest) in bundle["services"].items() {
-            self._apply_or_replace_service(core_v1, namespace, svc_manifest);
+            self._apply_or_replace(
+                core_v1,
+                "read_namespaced_service",
+                "patch_namespaced_service",
+                "create_namespaced_service",
+                namespace,
+                svc_manifest
+            );
             if self.logger {
                 self.logger.info(
                     f"Applied Service for '{svc_name}'",
@@ -641,7 +655,14 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
         }
 
         for (svc_name, dep_manifest) in bundle["deployments"].items() {
-            self._apply_or_replace_deployment(apps_v1, namespace, dep_manifest);
+            self._apply_or_replace(
+                apps_v1,
+                "read_namespaced_deployment",
+                "patch_namespaced_deployment",
+                "create_namespaced_deployment",
+                namespace,
+                dep_manifest
+            );
             if self.logger {
                 self.logger.info(
                     f"Applied Deployment for '{svc_name}'",
@@ -731,7 +752,14 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
         }
 
         for (svc_name, pdb_manifest) in bundle.get("pdbs", {}).items() {
-            self._apply_or_replace_pdb(policy_v1, namespace, pdb_manifest);
+            self._apply_or_replace(
+                policy_v1,
+                "read_namespaced_pod_disruption_budget",
+                "patch_namespaced_pod_disruption_budget",
+                "create_namespaced_pod_disruption_budget",
+                namespace,
+                pdb_manifest
+            );
             if self.logger {
                 self.logger.info(
                     f"Applied PDB for '{svc_name}'",
@@ -742,7 +770,14 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
 
         ingress_manifest: any = bundle.get("ingress");
         if ingress_manifest {
-            self._apply_or_replace_ingress(networking_v1, namespace, ingress_manifest);
+            self._apply_or_replace(
+                networking_v1,
+                "read_namespaced_ingress",
+                "patch_namespaced_ingress",
+                "create_namespaced_ingress",
+                namespace,
+                ingress_manifest
+            );
             if self.logger {
                 self.logger.info(
                     "Applied Ingress for gateway",
@@ -813,41 +848,27 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
         }
     }
 
-    # _apply_or_replace_* family: idempotent read-then-patch-or-create on 404.
-    # PVC is the exception: create-on-404, otherwise no-op (PVCs are mostly
+    # Generic idempotent upsert: read-then-update-or-create on 404. Callers pass
+    # the k8s api object plus the read/update/create method names (resolved with
+    # getattr so the Unknown-typed client needs no per-call-site attribute access);
+    # `update` is patch_* for most resources and replace_* for ConfigMaps. PVC is
+    # the exception below: create-on-404, otherwise no-op (PVCs are mostly
     # immutable post-bind; patch would error or orphan the PV).
-    def _apply_or_replace_service(
-        core_v1: any, namespace: str, manifest: dict[str, any]
+    def _apply_or_replace(
+        api: any,
+        read: str,
+        update: str,
+        create: str,
+        namespace: str,
+        manifest: dict[str, any]
     ) {
         name: str = manifest["metadata"]["name"];
         try {
-            core_v1.read_namespaced_service(name=name, namespace=namespace);
-            core_v1.patch_namespaced_service(
-                name=name, namespace=namespace, body=manifest
-            );
+            getattr(api, read)(name=name, namespace=namespace);
+            getattr(api, update)(name=name, namespace=namespace, body=manifest);
         } except ApiException as e {
             if e.status == 404 {
-                core_v1.create_namespaced_service(namespace=namespace, body=manifest);
-            } else {
-                raise;
-            }
-        }
-    }
-
-    def _apply_or_replace_configmap(
-        core_v1: any, namespace: str, manifest: dict[str, any]
-    ) {
-        name: str = manifest["metadata"]["name"];
-        try {
-            core_v1.read_namespaced_config_map(name=name, namespace=namespace);
-            core_v1.replace_namespaced_config_map(
-                name=name, namespace=namespace, body=manifest
-            );
-        } except ApiException as e {
-            if e.status == 404 {
-                core_v1.create_namespaced_config_map(
-                    namespace=namespace, body=manifest
-                );
+                getattr(api, create)(namespace=namespace, body=manifest);
             } else {
                 raise;
             }
@@ -870,68 +891,6 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
         } except ApiException as e {
             if e.status == 404 {
                 core_v1.create_namespaced_persistent_volume_claim(
-                    namespace=namespace, body=manifest
-                );
-            } else {
-                raise;
-            }
-        }
-    }
-
-    def _apply_or_replace_deployment(
-        apps_v1: any, namespace: str, manifest: dict[str, any]
-    ) {
-        name: str = manifest["metadata"]["name"];
-        try {
-            apps_v1.read_namespaced_deployment(name=name, namespace=namespace);
-            apps_v1.patch_namespaced_deployment(
-                name=name, namespace=namespace, body=manifest
-            );
-        } except ApiException as e {
-            if e.status == 404 {
-                apps_v1.create_namespaced_deployment(
-                    namespace=namespace, body=manifest
-                );
-            } else {
-                raise;
-            }
-        }
-    }
-
-    def _apply_or_replace_pdb(
-        policy_v1: any, namespace: str, manifest: dict[str, any]
-    ) {
-        name: str = manifest["metadata"]["name"];
-        try {
-            policy_v1.read_namespaced_pod_disruption_budget(
-                name=name, namespace=namespace
-            );
-            policy_v1.patch_namespaced_pod_disruption_budget(
-                name=name, namespace=namespace, body=manifest
-            );
-        } except ApiException as e {
-            if e.status == 404 {
-                policy_v1.create_namespaced_pod_disruption_budget(
-                    namespace=namespace, body=manifest
-                );
-            } else {
-                raise;
-            }
-        }
-    }
-
-    def _apply_or_replace_ingress(
-        networking_v1: any, namespace: str, manifest: dict[str, any]
-    ) {
-        name: str = manifest["metadata"]["name"];
-        try {
-            networking_v1.read_namespaced_ingress(name=name, namespace=namespace);
-            networking_v1.patch_namespaced_ingress(
-                name=name, namespace=namespace, body=manifest
-            );
-        } except ApiException as e {
-            if e.status == 404 {
-                networking_v1.create_namespaced_ingress(
                     namespace=namespace, body=manifest
                 );
             } else {
