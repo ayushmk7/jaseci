@@ -42,6 +42,70 @@ bundled one. A bundled module links through the existing cross-module machinery
   intercept, so it is exact for a fixed timestamp; `year`/`month`/`day`/`hour`/
   `minute`/`second`, `weekday()`, and `isoformat()` match CPython. SCOPE: UTC /
   fixed-offset only (no tz database, DST, leap seconds, or microseconds).
+- **`textwrap.na.jac`** (#6978 Phase 3) -- the greedy line wrapper (`wrap`,
+  `fill`) plus `dedent` and `indent`, a faithful port of CPython's
+  `TextWrapper._wrap_chunks`/`_handle_long_word` over primitives (following
+  CPython **>= 3.14** long-word semantics -- 3.14 stopped breaking a long word
+  when `space_left == 0`, so 3.13-and-earlier output differs exactly there; the
+  bundled sv runtime is 3.14 -- plus the `width <= 0` ->
+  `ValueError("invalid width ... (must be > 0)")` error path). **WARNING -- default-call divergence:** this module implements
+  `break_on_hyphens=False` semantics (words split on whitespace only), but
+  CPython's default is `break_on_hyphens=True`; the *same* `wrap(text, width)`
+  call therefore returns different lines on sv vs na whenever the text contains
+  hyphenated words (e.g. `wrap("well-known", 6)` -> `['well-', 'known']` on sv,
+  `['well-k', 'nown']` on na). Keep hyphenated text away from `wrap`/`fill`, or
+  pass `break_on_hyphens=False` explicitly on the sv side. All other
+  TextWrapper defaults matched (`expand_tabs`, `replace_whitespace`,
+  `drop_whitespace`, `break_long_words`, empty indents, no `max_lines`);
+  `indent` splits on `"\n"`; `shorten`/`TextWrapper` not provided.
+- **`csv.na.jac`** (#6978 Phase 3) -- `reader` for the default **excel** dialect
+  (delimiter `,`, quotechar `"`, `doublequote=True`, `skipinitialspace=False`,
+  QUOTE_MINIMAL). Field parsing matches CPython exactly (quoted fields, doubled
+  quotes, a quote opening a field only at its start, literal mid-field quotes,
+  unterminated quotes, a `\n` inside a quoted region of a single input string,
+  empty line -> `[]`). A NUL character parses as an ordinary character,
+  matching CPython **>= 3.14** (3.13 and earlier raised
+  `csv.Error("line contains NUL")`; the bundled sv runtime is 3.14) -- but the
+  native string type drops an embedded NUL byte on concatenation, so while
+  field *splitting* around a NUL is congruent, NUL-bearing field *content* is
+  not (`"a\x00b"` comes back as `"ab"` on na). Note the native pathway has no
+  `csv.Error` type anyway -- if a future error path is added it will surface as
+  `ValueError`.
+  SCOPE: eager `list[list[str]]` (congruent with `list(csv.reader(...))`), one
+  record per input string -- a *record* cannot span two input strings, so
+  feeding a file's raw split lines with multi-line quoted fields diverges from
+  CPython's file-object mode; `writer`/`DictReader`/`DictWriter`/custom
+  dialects not provided.
+- **`pprint.na.jac`** (#6978 Phase 3) -- `pformat` rendering a single-line repr
+  with dict keys sorted (CPython `sort_dicts=True`) and Python `repr`
+  conventions for str/int/bool/None/list/dict, including full string escaping:
+  backslash/quotes, `\n`/`\t`/`\r` short forms, and `\xNN` for the remaining
+  C0 controls (0x00-0x1f) and DEL (0x7f). SCOPE: **single-line output only** --
+  CPython wraps representations longer than `width=80` across lines, so any
+  object whose repr exceeds one line diverges (width-driven wrapping not
+  implemented); string dict keys; no floats (the `json` `str(float)` `%g`
+  divergence); bytes > 0x7f pass through unescaped, so *unicode* non-printables
+  (e.g. U+00A0, U+200B) are NOT `\uXXXX`-escaped as CPython would -- congruent
+  for ASCII and printable-unicode payloads. Out-of-scope value types: `set`
+  raises `ValueError("pprint: unsupported value type on native")` instead of
+  silently misrendering; other non-JSON values (e.g. object instances) cannot
+  be type-discriminated from `None` by the native runtime today (JacVal tags 6
+  vs 8 are both invisible to `isinstance`, and `any` truthiness/`is None` are
+  not native-compilable), so they render as `"None"` -- a documented
+  divergence.
+- **`difflib.na.jac`** (#6978 Phase 3) -- `SequenceMatcher`
+  (`ratio`/`get_matching_blocks`/`set_seq1`/`set_seq2`, full 4-arg constructor
+  including `autojunk`) and `get_close_matches`, a port of CPython's
+  longest-match DP, matching-block recursion, and `__chain_b` popular-element
+  pruning (`autojunk=True` and `len(b) >= 200`: elements occurring more than
+  `len(b) // 100 + 1` times cannot seed a match, exactly as their exclusion from
+  CPython's `b2j`; they still participate in match extension since `bjunk` is
+  empty). `get_close_matches` raises CPython's `ValueError`s for `n <= 0` and
+  `cutoff` outside `[0.0, 1.0]`. SCOPE: string sequences; `isjunk` accepted but
+  ignored (a non-None `isjunk` silently behaves as None -- the remaining
+  error-path/behavior divergence); `ratio` is the same IEEE-double value (only
+  its `str` rendering would differ);
+  `get_opcodes`/`unified_diff`/`ndiff`/`Differ`/`HtmlDiff` not provided.
 
 - **`fractions.na.jac`** (#6978 Phase 2) -- a pure-Jac (Mechanism B) `Fraction`
   over native `int`, normalized on construction via Euclid's GCD with the sign
