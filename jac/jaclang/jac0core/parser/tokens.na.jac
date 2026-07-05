@@ -240,7 +240,6 @@ obj Token {
         value: str,
         loc: SourceLoc;
 
-    def is_keyword -> bool;
     def __str__ -> str;
 }
 
@@ -374,5 +373,3 @@ def lookup_keyword(text: str) -> TokenKind | None {
     }
     return None;
 }
-
-glob _init = 0;
