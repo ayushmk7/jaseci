@@ -136,11 +136,6 @@ class PointerType(Type) {
     def __hash__(self: PointerType) -> object {
         return hash(PointerType);
     }
-
-    @classmethod
-    def from_llvm(cls: Any, typeref: Any, ir_ctx: Any) -> object {
-        return cls();
-    }
 }
 
 class _TypedPointerType(PointerType) {
@@ -192,11 +187,6 @@ class VoidType(Type) {
     def __hash__(self: VoidType) -> object {
         return hash(VoidType);
     }
-
-    @classmethod
-    def from_llvm(cls: Any, typeref: Any, ir_ctx: Any) -> object {
-        return cls();
-    }
 }
 
 class FunctionType(Type) {
@@ -237,16 +227,6 @@ class FunctionType(Type) {
 
     def __hash__(self: FunctionType) -> object {
         return hash(FunctionType);
-    }
-
-    @classmethod
-    def from_llvm(cls: Any, typeref: Any, ir_ctx: Any) -> object {
-        params = `tuple(
-            x.as_ir(ir_ctx=ir_ctx) for x in typeref.get_function_parameters()
-        );
-        ret = typeref.get_function_return().as_ir(ir_ctx=ir_ctx);
-        is_vararg = typeref.is_function_vararg;
-        return cls(ret, params, is_vararg);
     }
 }
 
@@ -315,11 +295,6 @@ class IntType(Type) {
         }
         return val;
     }
-
-    @classmethod
-    def from_llvm(cls: Any, typeref: Any, ir_ctx: Any) -> object {
-        return IntType(typeref.type_width);
-    }
 }
 
 def _as_float(value: Any) -> object {
@@ -363,11 +338,6 @@ class _BaseFloatType(Type) {
     @classmethod
     def _create_instance(cls: Any) -> object {
         cls._instance_cache = super.__new__(cls);
-    }
-
-    @classmethod
-    def from_llvm(cls: Any, typeref: Any, ir_ctx: Any) -> object {
-        return cls();
     }
 }
 
@@ -502,14 +472,6 @@ class VectorType(Type) {
             for (ty, val) in zip(self.elements, values)
         ];
     }
-
-    @classmethod
-    def from_llvm(cls: Any, typeref: Any, ir_ctx: Any) -> object {
-        [elemtyperef] = typeref.elements;
-        elemty = elemtyperef.as_ir(ir_ctx=ir_ctx);
-        count = typeref.element_count;
-        return cls(elemty, count);
-    }
 }
 
 class Aggregate(Type) {
@@ -573,14 +535,6 @@ class ArrayType(Aggregate) {
         );
         return "[{0}]".format(itemstring);
     }
-
-    @classmethod
-    def from_llvm(cls: Any, typeref: Any, ir_ctx: Any) -> object {
-        [elemtyperef] = typeref.elements;
-        elemty = elemtyperef.as_ir(ir_ctx=ir_ctx);
-        count = typeref.element_count;
-        return cls(elemty, count);
-    }
 }
 
 class BaseStructType(Aggregate) {
@@ -638,16 +592,6 @@ class BaseStructType(Aggregate) {
             return '<{}>'.format(textrepr);
         } else {
             return textrepr;
-        }
-    }
-
-    @classmethod
-    def from_llvm(cls: Any, typeref: Any, ir_ctx: Any) -> object {
-        if typeref.is_literal_struct {
-            elems = [el.as_ir(ir_ctx=ir_ctx) for el in typeref.elements];
-            return cls(elems, typeref.is_packed_struct);
-        } else {
-            return ir_ctx.get_identified_type(typeref.name);
         }
     }
 }

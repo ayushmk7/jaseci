@@ -115,7 +115,6 @@ glob LLVMArgumentsIterator = _opaque("LLVMArgumentsIterator");
 glob LLVMInstructionsIterator = _opaque("LLVMInstructionsIterator");
 glob LLVMOperandsIterator = _opaque("LLVMOperandsIterator");
 glob LLVMIncomingBlocksIterator = _opaque("LLVMIncomingBlocksIterator");
-glob LLVMTypesIterator = _opaque("LLVMTypesIterator");
 glob LLVMObjectCacheRef = _opaque("LLVMObjectCache");
 glob LLVMObjectFileRef = _opaque("LLVMObjectFile");
 glob LLVMSectionIteratorRef = _opaque("LLVMSectionIterator");
