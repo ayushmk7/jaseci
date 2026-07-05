@@ -152,11 +152,6 @@ def is_python(path: str) -> bool:
     return path.endswith(_PY_SUFFIXES)
 
 
-def is_js(path: str) -> bool:
-    """True for the ECMAScript family (``.js`` / ``.ts`` / ``.jsx`` / ``.tsx``)."""
-    return path.endswith(_JS_SUFFIXES)
-
-
 def language_of(path: str) -> str:
     """Classify ``path`` as ``'jac'`` / ``'pyi'`` / ``'py'`` / ``'js'`` / ``'other'``."""
     if path.endswith(JAC_SUFFIX):
