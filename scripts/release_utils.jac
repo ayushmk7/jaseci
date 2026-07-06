@@ -1,15 +1,13 @@
 """Shared utilities for release scripts.
 
 This module provides the single source of truth for package metadata,
-version bumping logic, PyPI availability checks, and GitHub Actions output helpers.
+version bumping logic, and GitHub Actions output helpers.
 All release-related scripts import from here to ensure consistency.
 """
 import from __future__ { annotations }
 import os;
 import re;
 import tomllib;
-import urllib.error;
-import urllib.request;
 import from pathlib { Path }
 import from typing { NamedTuple }
 """Package metadata for release scripts."""
