@@ -156,9 +156,6 @@ def main -> None {
         pr_body += f"- Version: {old} → {new_ver}\n";
         pr_body += f"- Bump type: {rel['bump']}\n\n";
     }
-    if any(DEPENDENTS.get(rel["pypi_name"]) for rel in releases) {
-        pr_body += "- Updated internal dependency versions in dependent packages\n";
-    }
     pr_body += "- Updated release notes\n";
     set_output("branch_name", branch_name);
     set_output("pr_title", pr_title);

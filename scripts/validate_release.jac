@@ -1,9 +1,8 @@
-"""Pre-release validation to catch version conflicts early.
+"""Pre-release validation to catch version mistakes early.
 
 Runs during the create-release-pr workflow BEFORE bumping versions.
-Computes what the new versions would be and checks PyPI to ensure
-they don't already exist. Fails fast to prevent wasted PR creation
-if a version was already published.
+Computes and prints what the new versions would be so an invalid bump
+fails fast before any files are mutated.
 """
 import from __future__ { annotations }
 import argparse;
