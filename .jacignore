@@ -273,10 +273,6 @@ theme_handler.jac
 docs/docs/assets/examples/object_spatial/finding_common_interests.jac
 docs/docs/assets/examples/object_spatial/object_spatial_references.jac
 docs/docs/examples/chapter_10_school.jac
-jac/examples/mcp-dashboard-studio/backend/service.jac
-jac/examples/mcp-dashboard-studio/backend/utils.jac
-jac/examples/mcp-dashboard-studio/frontend/Dashboard.cl.jac
-jac/examples/mcp-dashboard-studio/frontend/Dashboard.impl.jac
 jac/examples/mobui/hello/main.jac
 jac/examples/mobui/littlex/main.jac
 jac/examples/mobui/littlex/theme.cl.jac
