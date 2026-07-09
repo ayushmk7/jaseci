@@ -19,6 +19,7 @@ import from jaclang.scale.models.deployment_result { DeploymentResult }
 import from jaclang.scale.config.config_loader { JacScaleConfig, get_scale_config }
 import from jaclang.scale.deploy.target.factory { DeploymentTargetFactory }
 import from jaclang.scale.deploy.database.factory { DatabaseProviderFactory }
+import from jaclang.scale.deploy.database { kubernetes_redis as redis_module }
 import from jaclang.scale.observability.factory { UtilityFactory }
 import from jaclang.scale.deploy.target.kubernetes.kubernetes_config {
     KubernetesConfig
@@ -526,6 +527,100 @@ test "kubernetes database provider security context" {
 
     assert mongo_deploy['service_account']['automountServiceAccountToken'] is False;
     assert redis_deploy['service_account']['automountServiceAccountToken'] is False;
+}
+
+test "redis pod resources default to configured values" {
+    redis_provider = DatabaseProviderFactory.create(
+        'kubernetes_redis', None, {'app_name': 'test-app'}
+    );
+    redis_deploy = redis_provider.deploy();
+    resources = redis_deploy['deployment']['spec']['template']['spec']['containers'][0][
+        'resources'
+    ];
+
+    assert resources['requests']['cpu'] == '100m';
+    assert resources['requests']['memory'] == '128Mi';
+    assert resources['limits']['cpu'] == '500m';
+    assert resources['limits']['memory'] == '1Gi';
+}
+
+test "default redis memory limit does not emit a headroom warning" {
+    mock_logger = unittest.mock.MagicMock();
+
+    with unittest.mock.patch.object(redis_module, 'logger', mock_logger) {
+        redis_provider = DatabaseProviderFactory.create(
+            'kubernetes_redis', None, {'app_name': 'test-app'}
+        );
+        redis_provider.deploy();
+    }
+
+    warned = any(
+        'redis_memory_limit' in str(call) for call in mock_logger.warning.call_args_list
+    );
+    assert not warned , "default 1Gi limit over 200mb maxmemory must not warn";
+}
+
+test "redis pod resources propagate from [scale.database] config" {
+    fake_config = SimpleNamespace(
+        get_database_config=lambda :
+            {
+                'redis_max_memory': '200mb',
+                'redis_cpu_request': '500m',
+                'redis_cpu_limit': '2000m',
+                'redis_memory_request': '1Gi',
+                'redis_memory_limit': '4Gi'
+            },
+        get_kubernetes_config=lambda : {}
+    );
+
+    with unittest.mock.patch.object(
+        redis_module, 'get_scale_config', lambda : fake_config
+    ) {
+        redis_provider = DatabaseProviderFactory.create(
+            'kubernetes_redis', None, {'app_name': 'test-app'}
+        );
+        redis_deploy = redis_provider.deploy();
+    }
+
+    resources = redis_deploy['deployment']['spec']['template']['spec']['containers'][0][
+        'resources'
+    ];
+
+    assert resources['requests']['cpu'] == '500m';
+    assert resources['requests']['memory'] == '1Gi';
+    assert resources['limits']['cpu'] == '2000m';
+    assert resources['limits']['memory'] == '4Gi';
+}
+
+test "redis warns when memory limit lacks headroom over maxmemory" {
+    fake_config = SimpleNamespace(
+        get_database_config=lambda :
+            {
+                'redis_max_memory': '200mb',
+                'redis_cpu_request': '250m',
+                'redis_cpu_limit': '1000m',
+                'redis_memory_request': '128Mi',
+                'redis_memory_limit': '256Mi'
+            },
+        get_kubernetes_config=lambda : {}
+    );
+    mock_logger = unittest.mock.MagicMock();
+
+    with unittest.mock.patch.object(
+        redis_module, 'get_scale_config', lambda : fake_config
+    ) {
+        with unittest.mock.patch.object(redis_module, 'logger', mock_logger) {
+            redis_provider = DatabaseProviderFactory.create(
+                'kubernetes_redis', None, {'app_name': 'test-app'}
+            );
+            redis_provider.deploy();
+        }
+    }
+
+    warned = any(
+        'redis_memory_limit' in str(call) for call in mock_logger.warning.call_args_list
+    );
+    assert warned , "expected a headroom warning when limit <= 2x maxmemory";
 }
 
 obj FakeNetworkingV1 {
