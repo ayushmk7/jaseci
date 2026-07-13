@@ -13,6 +13,73 @@ def _should_parallelize(mt_run: MTRuntime) -> bool {
 }
 
 
+"""React-loop config (max_iters, on_iteration, compaction params) - shared so
+_invoke_react_loop and _invoke_streaming can't drift."""
+def _react_loop_config(model: BaseLLM, mt_run: MTRuntime) -> tuple[int, object, dict] {
+    max_iters = int(
+        mt_run.call_params.get("max_react_iterations")
+        or model.call_params.get("max_react_iterations")
+        or _call_params_config.get("max_react_iterations")
+        or 0
+    );
+    on_iteration = (
+        mt_run.call_params.get("on_iteration") or model.call_params.get("on_iteration")
+    );
+    return (max_iters, on_iteration, model._resolve_compaction_params(mt_run));
+}
+
+
+"""Split tool calls into (non_finish_calls, finish_tc) at the first finish_tool
+call - shared so both react loops normalize history identically."""
+def _split_finish_call(tool_calls: list) -> tuple[list, ToolCall | None] {
+    non_finish_calls: list = [];
+    finish_tc = None;
+    for tc in tool_calls {
+        if tc.is_finish_call() {
+            finish_tc = tc;
+            break;
+        }
+        non_finish_calls.append(tc);
+    }
+    return (non_finish_calls, finish_tc);
+}
+
+
+"""Batch non-finish tool calls: one batch when parallel mode is active, else one
+call per batch - shared by both react loops."""
+def _batch_tool_calls(mt_run: MTRuntime, non_finish_calls: list) -> list[list] {
+    return (
+        [non_finish_calls]
+            if _should_parallelize(mt_run)
+            else [[tc] for tc in non_finish_calls]
+    );
+}
+
+
+"""Call the on_iteration hook (no-op before iteration 2); returns its
+IterationAction, or None if not due - shared by both react loops."""
+def _resolve_iteration_action(
+    on_iteration: object,
+    iter_count: int,
+    mt_run: MTRuntime,
+    last_tool: str,
+    last_result: str,
+    total_tokens: int
+) -> object {
+    if not (on_iteration and iter_count > 1) {
+        return None;
+    }
+    ctx = IterationContext(
+        iteration=iter_count,
+        messages=mt_run.messages,
+        last_tool=last_tool,
+        last_result=last_result,
+        total_tokens=total_tokens
+    );
+    return on_iteration(ctx);
+}
+
+
 """True for transient transport errors worth retrying the same model: read-timeout
 stall, mid-stream connection drop, and brief 5xx. Auth/RateLimit/NotFound and all
 other errors are non-transient and propagate unchanged."""
@@ -884,16 +951,7 @@ impl BaseLLM._invoke_with_handler(mt_run: MTRuntime, on_event: Callable) -> obje
 
 
 impl BaseLLM._invoke_react_loop(mt_run: MTRuntime) -> object {
-    max_iters = (
-        mt_run.call_params.get("max_react_iterations")
-        or self.call_params.get("max_react_iterations")
-        or _call_params_config.get("max_react_iterations")
-        or 0
-    );
-    on_iteration = (
-        mt_run.call_params.get("on_iteration") or self.call_params.get("on_iteration")
-    );
-    _cp = self._resolve_compaction_params(mt_run);
+    (max_iters, on_iteration, _cp) = _react_loop_config(self, mt_run);
     iter_count = 0;
     last_tool = "";
     last_result = "";
@@ -901,15 +959,10 @@ impl BaseLLM._invoke_react_loop(mt_run: MTRuntime) -> object {
     just_compacted = False;
     while True {
         iter_count += 1;
-        if on_iteration and iter_count > 1 {
-            ctx = IterationContext(
-                iteration=iter_count,
-                messages=mt_run.messages,
-                last_tool=last_tool,
-                last_result=last_result,
-                total_tokens=total_tokens
-            );
-            action = on_iteration(ctx);
+        action = _resolve_iteration_action(
+            on_iteration, iter_count, mt_run, last_tool, last_result, total_tokens
+        );
+        if action is not None {
             if action == IterationAction.ABORT {
                 return last_result;
             }
@@ -949,11 +1002,7 @@ impl BaseLLM._invoke_react_loop(mt_run: MTRuntime) -> object {
             return recovery_resp.output;
         }
         usage = resp.usage or {};
-        total_tokens += int(
-            usage.get("total_tokens", 0)
-                if isinstance(usage, dict)
-                else getattr(usage, "total_tokens", 0)
-        );
+        total_tokens += _usage_int(usage, "total_tokens");
         # Threshold-based proactive compaction: check current input size against the
         # context window and compact before the next iteration crosses the limit.
         just_compacted = self._maybe_compact(mt_run, usage, just_compacted, _cp);
@@ -961,24 +1010,12 @@ impl BaseLLM._invoke_react_loop(mt_run: MTRuntime) -> object {
             # Split at first finish_tool - anything after it is discarded.
             # This normalizes history regardless of parallel/sequential mode:
             # both modes see the same tool calls and produce the same mt_run.messages.
-            non_finish_calls: list = [];
-            finish_tc = None;
-            for tc in resp.tool_calls {
-                if tc.is_finish_call() {
-                    finish_tc = tc;
-                    break;
-                }
-                non_finish_calls.append(tc);
-            }
+            (non_finish_calls, finish_tc) = _split_finish_call(resp.tool_calls);
 
             # Always route through dispatch_batch - one code path for both modes.
             # Parallel: full batch (concurrent). Sequential: one-at-a-time (inline, no pool overhead).
             if non_finish_calls {
-                batches = (
-                    [non_finish_calls]
-                        if _should_parallelize(mt_run)
-                        else [[tc] for tc in non_finish_calls]
-                );
+                batches = _batch_tool_calls(mt_run, non_finish_calls);
                 for batch in batches {
                     raw_results: list = list(dispatch_batch(batch));
                     ordered: dict = {};
@@ -1941,17 +1978,12 @@ impl BaseLLM._invoke_streaming(
         }
     } else {
         # ReAct loop with tools
-        max_iters = (
-            mt_run.call_params.get("max_react_iterations")
-            or self.call_params.get("max_react_iterations")
-            or _call_params_config.get("max_react_iterations")
-            or 0
-        );
-        on_iteration = (
-            mt_run.call_params.get("on_iteration")
-            or self.call_params.get("on_iteration")
-        );
-        _cp = self._resolve_compaction_params(mt_run);
+        # ponytail: still duplicates _invoke_react_loop's branching (this one
+        # yields a StreamEvent per step, that one returns a value) - merging
+        # needs a generator/callback redesign, not a call-site tweak. Shared
+        # sub-steps live in _react_loop_config/_split_finish_call/_batch_tool_calls/
+        # _resolve_iteration_action/_usage_int above.
+        (max_iters, on_iteration, _cp) = _react_loop_config(self, mt_run);
         iter_count = 0;
         last_tool = "";
         last_result = "";
@@ -1960,15 +1992,10 @@ impl BaseLLM._invoke_streaming(
         while True {
             iter_count += 1;
 
-            if on_iteration and iter_count > 1 {
-                ctx = IterationContext(
-                    iteration=iter_count,
-                    messages=mt_run.messages,
-                    last_tool=last_tool,
-                    last_result=last_result,
-                    total_tokens=total_tokens
-                );
-                action = on_iteration(ctx);
+            action = _resolve_iteration_action(
+                on_iteration, iter_count, mt_run, last_tool, last_result, total_tokens
+            );
+            if action is not None {
                 if action == IterationAction.ABORT {
                     yield StreamEvent(
                         event_type="steps_done",
@@ -2059,11 +2086,7 @@ impl BaseLLM._invoke_streaming(
             self._usage_history.append(resp.usage);
 
             usage = resp.usage or {};
-            total_tokens += int(
-                usage.get("total_tokens", 0)
-                    if isinstance(usage, dict)
-                    else getattr(usage, "total_tokens", 0)
-            );
+            total_tokens += _usage_int(usage, "total_tokens");
             # Threshold-based proactive compaction - identical logic to invoke().
             just_compacted = self._maybe_compact(mt_run, usage, just_compacted, _cp);
 
@@ -2094,15 +2117,7 @@ impl BaseLLM._invoke_streaming(
             # `thought` events while the call was in flight.
             if resp.tool_calls {
                 # Split at first finish_tool - normalizes history for both modes.
-                non_finish_calls: list = [];
-                finish_tc = None;
-                for tc in resp.tool_calls {
-                    if tc.is_finish_call() {
-                        finish_tc = tc;
-                        break;
-                    }
-                    non_finish_calls.append(tc);
-                }
+                (non_finish_calls, finish_tc) = _split_finish_call(resp.tool_calls);
 
                 if non_finish_calls {
                     max_result_len = int(
@@ -2113,11 +2128,7 @@ impl BaseLLM._invoke_streaming(
                     );
 
                     # Parallel: full batch. Sequential: one-at-a-time via dispatch_batch.
-                    batches = (
-                        [non_finish_calls]
-                            if _should_parallelize(mt_run)
-                            else [[tc] for tc in non_finish_calls]
-                    );
+                    batches = _batch_tool_calls(mt_run, non_finish_calls);
 
                     for batch in batches {
                         # Announce tool calls before execution
