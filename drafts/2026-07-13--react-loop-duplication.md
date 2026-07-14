@@ -4,10 +4,10 @@ package: "jac-byllm"
 date: "2026-07-13"
 title: "refactor(jac-byllm): _invoke_streaming's tool branch duplicated ~150 lines of _in"
 risk: "low"
-tests: "jac check \u2713 \u00b7 tests (no new failures vs baseline) \u2713 \u00b7 pre-commit \u2713 (4 min)"
+tests: "jac check + tests + pre-commit OK"
 release_note: "docs/docs/community/release_notes/unreleased/byllm/0000.refactor.md"
 files: 1
-loc: {"before": 2252, "after": 2263}
+loc: {"added": 90, "removed": 77}
 ---
 
 # refactor(jac-byllm): _invoke_streaming's tool branch duplicated ~150 lines of _in
@@ -23,7 +23,7 @@ simplified per the ponytail ladder (does it need to exist → stdlib → one lin
 
 - `jac/jaclang/byllm/llm.impl/basellm.impl.jac`
 
-Net: **--11 LOC** (2252 → 2263).
+Lines: **+90 -77** (net +13).
 
 ## Consciously deferred
 
@@ -31,7 +31,7 @@ Net: **--11 LOC** (2252 → 2263).
 
 ## Verification
 
-jac check ✓ · tests (no new failures vs baseline) ✓ · pre-commit ✓ (4 min)
+jac check + tests + pre-commit OK
 
 ## Reviewer checklist
 
