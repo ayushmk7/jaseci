@@ -273,46 +273,52 @@ def _call_fields(cobj: object) -> dict | None {
 
 
 def _extract_json_call(content: str, tool_names: list) -> dict | None {
+    decoder = json.JSONDecoder();
     i = 0;
     while i < len(content) {
         if content[i] == "{" {
-            blob = _balanced(content, i, "{", "}");
-            if blob is None {
-                return None;
-            }
-            parsed: object = None;
+            parsed: dict | None = None;
+            end = i;
             try {
-                parsed = json.loads(blob);
+                (parsed, end) = decoder.raw_decode(content, i);
             } except Exception {
                 parsed = None;
             }
-            if isinstance(parsed, dict) {
-                wrapped = parsed.get("tool_calls") or parsed.get("tool_call");
-                candidates: list = [];
-                if isinstance(wrapped, list) {
-                    candidates = wrapped;
-                } elif isinstance(wrapped, dict) {
-                    candidates = [wrapped];
-                } else {
-                    candidates = [parsed];
+            # ponytail: malformed JSON at this brace falls back to the
+            # brace-balance scanner just to know how far to skip ahead.
+            blob: str | None = content[i:end] if parsed is not None else _balanced(content, i, "{", "}");
+            if blob is None {
+                return None;
+            }
+            if parsed is None {
+                i += len(blob);
+                continue;
+            }
+            wrapped = parsed.get("tool_calls") or parsed.get("tool_call");
+            candidates: list = [];
+            if isinstance(wrapped, list) {
+                candidates = wrapped;
+            } elif isinstance(wrapped, dict) {
+                candidates = [wrapped];
+            } else {
+                candidates = [parsed];
+            }
+            for cand in candidates {
+                if not isinstance(cand, dict) {
+                    continue;
                 }
-                for cand in candidates {
-                    if not isinstance(cand, dict) {
-                        continue;
-                    }
-                    fields = _call_fields(cand);
-                    if fields is None {
-                        continue;
-                    }
-                    name = str(fields.get("name"));
-                    if not tool_names or name in tool_names {
-                        return {
-                            "name": name,
-                            "arguments": fields.get("arguments"),
-                            "raw": blob,
-                            "pos": i
-                        };
-                    }
+                fields = _call_fields(cand);
+                if fields is None {
+                    continue;
+                }
+                name = str(fields.get("name"));
+                if not tool_names or name in tool_names {
+                    return {
+                        "name": name,
+                        "arguments": fields.get("arguments"),
+                        "raw": blob,
+                        "pos": i
+                    };
                 }
             }
             i += len(blob);
