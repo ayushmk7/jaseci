@@ -5,7 +5,11 @@ import logging;
 import os;
 import time;
 
-import from concurrent.futures { ThreadPoolExecutor, as_completed, TimeoutError as _FutTimeoutError }
+import from concurrent.futures {
+    ThreadPoolExecutor,
+    as_completed,
+    TimeoutError as _FutTimeoutError
+}
 import from jaclang.byllm.types { ToolCallResultMsg, normalize_tool_result }
 
 glob _plog = logging.getLogger("byllm.parallel"),
@@ -54,7 +58,7 @@ def _call_sync(tc: any, timeout: any) -> any {
     if timeout is None {
         return tc();
     }
-    # ponytail: reuse module-level _WORKER_POOL instead of a bespoke Thread
+
     f = _WORKER_POOL.submit(tc);
     try {
         return f.result(timeout=timeout);
