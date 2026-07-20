@@ -284,9 +284,10 @@ def _extract_json_call(content: str, tool_names: list) -> dict | None {
             } except Exception {
                 parsed = None;
             }
-            # ponytail: malformed JSON at this brace falls back to the
-            # brace-balance scanner just to know how far to skip ahead.
-            blob: str | None = content[i:end] if parsed is not None else _balanced(content, i, "{", "}");
+
+            blob: str | None = content[i:end]
+                if parsed is not None
+                else _balanced(content, i, "{", "}");
             if blob is None {
                 return None;
             }
