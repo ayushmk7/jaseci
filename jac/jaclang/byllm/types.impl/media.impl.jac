@@ -26,7 +26,6 @@ impl Image.postinit -> None {
         image = open_image(s);
         fmt = image.format or "PNG";
 
-        self.mime_type = self._format_to_mime(fmt);
         with BytesIO() as buffer {
             image.save(buffer, format=fmt);
             data = buffer.getvalue();
@@ -45,24 +44,10 @@ impl Image.postinit -> None {
         }
     }
 
+    raw: bytes | None = None;
     if isinstance(value, (bytes, bytearray, memoryview)) {
         raw = bytes(value);
-
-        img = open_image(BytesIO(raw));
-        fmt = img.format or "PNG";
-
-        try {
-            self.url = self._data_url_from_bytes(raw, fmt);
-        } except Exception {
-            with BytesIO() as buffer {
-                img.save(buffer, format=fmt);
-                self.url = self._data_url_from_bytes(buffer.getvalue(), fmt);
-            }
-        }
-        return;
-    }
-
-    if value?.read and callable(value?.read) {
+    } elif value?.read and callable(value?.read) {
         stream: IO[bytes] = value;
         pos = None;
         try {
@@ -81,9 +66,6 @@ impl Image.postinit -> None {
                 }
                 raw = stream.read();
             }
-            img = open_image(BytesIO(raw));
-            fmt = img.format or "PNG";
-            self.url = self._data_url_from_bytes(raw, fmt);
         } finally {
             if pos is not None and stream?.seek {
                 with suppress(Exception) {
@@ -91,13 +73,26 @@ impl Image.postinit -> None {
                 }
             }
         }
-        return;
     }
 
-    raise TypeError(
-        "Unsupported Image input type. Provide a URL/path string, data URL, bytes, "
-        "BytesIO, file-like object, os.PathLike, or PIL.Image.Image."
-    );
+    if raw is None {
+        raise TypeError(
+            "Unsupported Image input type. Provide a URL/path string, data URL, bytes, "
+            "BytesIO, file-like object, os.PathLike, or PIL.Image.Image."
+        );
+    }
+
+    img = open_image(BytesIO(raw));
+    fmt = img.format or "PNG";
+
+    try {
+        self.url = self._data_url_from_bytes(raw, fmt);
+    } except Exception {
+        with BytesIO() as buffer {
+            img.save(buffer, format=fmt);
+            self.url = self._data_url_from_bytes(buffer.getvalue(), fmt);
+        }
+    }
 }
 
 impl Image._format_to_mime(fmt: str | None) -> str {
