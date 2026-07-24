@@ -324,114 +324,6 @@ def _extract_json_call(content: str, tool_names: list) -> dict | None {
 }
 
 
-def _split_top_level(text: str) -> list[str] {
-    parts: list[str] = [];
-    buf = "";
-    depth = 0;
-    in_str = False;
-    quote = "";
-    escaped = False;
-    for ch in text {
-        if in_str {
-            buf += ch;
-            if escaped {
-                escaped = False;
-            } elif ch == "\\" {
-                escaped = True;
-            } elif ch == quote {
-                in_str = False;
-            }
-        } elif ch == "\"" or ch == "'" {
-            in_str = True;
-            quote = ch;
-            buf += ch;
-        } elif ch in "([{" {
-            depth += 1;
-            buf += ch;
-        } elif ch in ")]}" {
-            depth -= 1;
-            buf += ch;
-        } elif ch == "," and depth == 0 {
-            parts.append(buf);
-            buf = "";
-        } else {
-            buf += ch;
-        }
-    }
-    if buf.strip() {
-        parts.append(buf);
-    }
-    return parts;
-}
-
-
-def _parse_value(token: str) -> object {
-    t = token.strip();
-    if not t {
-        return "";
-    }
-    try {
-        return json.loads(t);
-    } except Exception { }
-    if len(t) >= 2 and t[0] == "'" and t[-1] == "'" {
-        return t[1:-1];
-    }
-    return t;
-}
-
-
-def _parse_kwargs(argstr: str) -> dict {
-    out: dict = {};
-    for part in _split_top_level(argstr) {
-        m = re.match("\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*[:=]\\s*", part);
-        if m is None {
-            continue;
-        }
-        out[m.group(1)] = _parse_value(part[m.end():]);
-    }
-    return out;
-}
-
-
-def _extract_paren_call(content: str, tool_names: list) -> dict | None {
-    for m in re.finditer("([A-Za-z_][A-Za-z0-9_]*)\\s*([\\(\\{])", content) {
-        name = m.group(1);
-        if name not in tool_names {
-            continue;
-        }
-        open_ch = m.group(2);
-        close_ch = ")" if open_ch == "(" else "}";
-        open_idx = m.end() - 1;
-        argblob = _balanced(content, open_idx, open_ch, close_ch);
-        if argblob is None {
-            continue;
-        }
-        return {
-            "name": name,
-            "arguments": _parse_kwargs(argblob[1:-1]),
-            "raw": content[m.start():open_idx + len(argblob)],
-            "pos": m.start()
-        };
-    }
-    return None;
-}
-
-
-def _extract_first_tool_call(content: str, tool_names: list) -> dict | None {
-    json_call = _extract_json_call(content, tool_names);
-    paren_call = _extract_paren_call(content, tool_names);
-    if json_call is None {
-        return paren_call;
-    }
-    if paren_call is None {
-        return json_call;
-    }
-    json_pos = int(json_call.get("pos") or 0);
-    paren_pos = int(paren_call.get("pos") or 0);
-    return json_call if json_pos <= paren_pos else paren_call;
-}
-
-
 def coerce_message_dict(message: object) -> dict {
     if isinstance(message, dict) {
         return message;
@@ -464,7 +356,7 @@ def recover_tool_calls(message: object, tool_names: list[str] | None = None) -> 
     if msg.get("tool_calls") {
         return msg;
     }
-    call = _extract_first_tool_call(content, names);
+    call = _extract_json_call(content, names);
     if call is None {
         return msg;
     }
